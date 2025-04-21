@@ -1,4 +1,6 @@
-Here's just the core transaction code you need to integrate into your existing React TypeScript webapp :
+# Smart contract integration
+
+This is an example to integrate smart contract interaction with ElizaOS
 
 ```typescript
 // solana-dao.ts
@@ -375,3 +377,40 @@ const handleCreateDao = async () => {
 ```
 
 The same pattern applies for creating proposals and voting.
+
+After creating the transaction, we can retrive the transaction and the voteAccount
+
+```typescript
+const { transaction, daoAccount } = result;
+```
+
+And pass it to the API to create the DAO :
+
+```typescript
+const connection = new Connection(SOLANA_RPC_ENDPOINT);
+const txTransaction = await walletState.sendTransaction(transaction, connection);
+
+// Wait for confirmation
+await connection.confirmTransaction(signature, 'confirmed');
+
+const pubkey = daoAccount.publicKey.toString(),
+```
+
+Then we pass pubkey and txTransaction into the form :
+
+```json
+{
+  name: string
+  description: string
+  discord_server?: string
+  twitter?: string
+  telegram?: string
+  instagram?: string
+  tiktok?: string
+  website?: string
+  treasury?: string
+  pubkey: string
+  transaction: string (txTransaction)
+  profile?: string
+}
+```
