@@ -56,6 +56,7 @@ async function main() {
       'https://testdao.org',
       'treasury_account_pubkey',
       'profile_url',
+      'token_address',
       solPriceUsd // Pass the mock SOL price directly
     );
     

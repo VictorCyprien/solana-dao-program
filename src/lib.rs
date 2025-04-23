@@ -69,6 +69,7 @@ pub enum DaoInstruction {
         website: String,
         treasury: String,
         profile: String,
+        token_address: String,
         sol_price_usd: u64, // Current SOL price in USD cents (e.g., 10000 = $100.00)
     },
     
@@ -117,6 +118,7 @@ pub struct Dao {
     pub website: String,
     pub treasury: String,
     pub profile: String,
+    pub token_address: String,
 }
 
 // Proposal account data structure
@@ -160,6 +162,7 @@ pub fn process_instruction(
             website,
             treasury,
             profile,
+            token_address,
             sol_price_usd,
         } => {
             process_create_dao(
@@ -175,6 +178,7 @@ pub fn process_instruction(
                 website,
                 treasury,
                 profile,
+                token_address,
                 sol_price_usd,
             )
         }
@@ -237,6 +241,7 @@ pub fn process_create_dao(
     website: String,
     treasury: String,
     profile: String,
+    token_address: String,
     sol_price_usd: u64,
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
@@ -281,6 +286,7 @@ pub fn process_create_dao(
         website,
         treasury,
         profile,
+        token_address,
     };
     
     // Calculate space required for the DAO account

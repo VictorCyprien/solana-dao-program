@@ -45,6 +45,7 @@ struct Dao {
     website: String,        // Official website URL
     treasury: String,       // Treasury account address
     profile: String,        // Profile image URL
+    token_address: String,  // Token address associated with the DAO
 }
 ```
 
@@ -77,7 +78,7 @@ struct Vote {
 ### Building the Program
 
 ```bash
-cargo build-bpf
+cargo build-sbf
 ```
 
 ### Deploying the Program
@@ -130,7 +131,8 @@ const handleCreateDao = async () => {
       "https://tiktok.com/@mydao",
       "https://mydao.org",
       "treasury_account_pubkey",
-      "profile_url"
+      "profile_url",
+      "token_address_pubkey"
     );
     
     // Send the transaction to the wallet for signing

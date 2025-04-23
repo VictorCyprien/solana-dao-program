@@ -30,16 +30,17 @@ function serializeString(str: string): Buffer {
 
 // Serialize DAO creation instruction data
 export function serializeCreateDaoInstruction(
-  name: string, 
-  description: string, 
-  discordServer: string, 
-  twitter: string, 
-  telegram: string, 
-  instagram: string, 
-  tiktok: string, 
-  website: string, 
-  treasury: string, 
-  profile: string, 
+  name: string,
+  description: string,
+  discordServer: string,
+  twitter: string,
+  telegram: string,
+  instagram: string,
+  tiktok: string,
+  website: string,
+  treasury: string,
+  profile: string,
+  tokenAddress: string,
   solPriceUsd: number
 ): Buffer {
   // Instruction index (0 for CreateDao)
@@ -57,6 +58,7 @@ export function serializeCreateDaoInstruction(
   const websiteBuf = serializeString(website);
   const treasuryBuf = serializeString(treasury);
   const profileBuf = serializeString(profile);
+  const tokenAddressBuf = serializeString(tokenAddress);
   
   // Serialize u64 sol price (8 bytes, little-endian)
   const solPriceBuf = Buffer.alloc(8);
@@ -80,6 +82,7 @@ export function serializeCreateDaoInstruction(
     websiteBuf,
     treasuryBuf,
     profileBuf,
+    tokenAddressBuf,
     solPriceBuf
   ]);
 }
@@ -166,7 +169,7 @@ export async function getSolPrice(): Promise<number> {
   }
 }
 
-// Create a new DAO transaction
+// Create a DAO transaction
 export async function createDaoTransaction(
   connection: Connection,
   wallet: { publicKey: PublicKey },
@@ -180,6 +183,7 @@ export async function createDaoTransaction(
   website: string,
   treasury: string,
   profile: string,
+  tokenAddress: string,
   solPriceUsd?: number // Optional - will fetch current price if not provided
 ): Promise<{ transaction: Transaction, daoAccount: Keypair }> {
   if (!wallet.publicKey) throw new Error("Wallet not connected");
@@ -204,6 +208,7 @@ export async function createDaoTransaction(
     website,
     treasury,
     profile,
+    tokenAddress,
     solPriceUsd
   );
   
@@ -356,7 +361,8 @@ const handleCreateDao = async () => {
       "https://tiktok.com/@mydao",
       "https://mydao.org",
       "treasury_account_pubkey",
-      "profile_url"
+      "profile_url",
+      "token_address_pubkey"
     );
     
     // Send the transaction to the wallet for signing
@@ -375,7 +381,6 @@ const handleCreateDao = async () => {
   }
 };
 ```
-
 The same pattern applies for creating proposals and voting.
 
 After creating the transaction, we can retrive the transaction and the voteAccount
@@ -412,5 +417,6 @@ Then we pass pubkey and txTransaction into the form :
   pubkey: string
   transaction: string (txTransaction)
   profile?: string
+  token_address: string
 }
 ```
