@@ -21,7 +21,7 @@ const fetch = require('node-fetch');
 const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
 
 // Program ID (deployed program ID)
-const programId = new PublicKey('7Mof2gtQh9478eWLAFTbzk9hpwsSjsaEsGiBGD42dMQj');
+const programId = new PublicKey('BLFfy2mhNyhwHB135oux43d4EtffJsmJ4LxSX66e7tHk');
 
 // Fee recipient address
 const FEE_ADDRESS = new PublicKey('BAGek78CDYQ8phuDqNk7sQzD7LdJeKkb7jD4y2AyR3tJ');
@@ -80,6 +80,7 @@ function serializeCreateDaoInstruction(
   website, 
   treasury, 
   profile, 
+  token_address,
   solPriceUsd
 ) {
   // Instruction index (0 for CreateDao)
@@ -97,6 +98,7 @@ function serializeCreateDaoInstruction(
   const websiteBuf = serializeString(website);
   const treasuryBuf = serializeString(treasury);
   const profileBuf = serializeString(profile);
+  const tokenAddressBuf = serializeString(token_address);
   
   // Serialize u64 sol price (8 bytes, little-endian)
   const solPriceBuf = Buffer.alloc(8);
@@ -120,6 +122,7 @@ function serializeCreateDaoInstruction(
     websiteBuf,
     treasuryBuf,
     profileBuf,
+    tokenAddressBuf,
     solPriceBuf
   ]);
 }
@@ -189,6 +192,65 @@ function serializeVoteInstruction(
   ]);
 }
 
+function serializeFeaturedInstruction(
+  daoId,
+  solPriceUsd
+) {
+  // Instruction index (3 for Featured)
+  const instructionBuf = Buffer.alloc(1);
+  instructionBuf.writeUInt8(3, 0);
+  
+  // Serialize string
+  const daoIdBuf = serializeString(daoId);
+  
+  // Serialize u64 sol price (8 bytes, little-endian)
+  const solPriceBuf = Buffer.alloc(8);
+  
+  // Convert to u64 (BN)
+  const solPriceBN = new BN(solPriceUsd.toString());
+  solPriceBN.toArray('le', 8).forEach((byte, index) => {
+    solPriceBuf[index] = byte;
+  });
+  
+  // Concat all buffers
+  return Buffer.concat([
+    instructionBuf,
+    daoIdBuf,
+    solPriceBuf
+  ]);
+}
+
+function serializeModulesInstruction(
+  daoId,
+  moduleType,
+  solPriceUsd
+) {
+  // Instruction index (4 for Modules)
+  const instructionBuf = Buffer.alloc(1);
+  instructionBuf.writeUInt8(4, 0);
+  
+  // Serialize strings
+  const daoIdBuf = serializeString(daoId);
+  const moduleTypeBuf = serializeString(moduleType);
+  
+  // Serialize u64 sol price (8 bytes, little-endian)
+  const solPriceBuf = Buffer.alloc(8);
+  
+  // Convert to u64 (BN)
+  const solPriceBN = new BN(solPriceUsd.toString());
+  solPriceBN.toArray('le', 8).forEach((byte, index) => {
+    solPriceBuf[index] = byte;
+  });
+  
+  // Concat all buffers
+  return Buffer.concat([
+    instructionBuf,
+    daoIdBuf,
+    moduleTypeBuf,
+    solPriceBuf
+  ]);
+}
+
 // Create a new DAO
 async function createDao(
   payer,
@@ -202,6 +264,7 @@ async function createDao(
   website,
   treasury,
   profile,
+  token_address,
   sol_price_usd = null // Optional parameter for direct price input
 ) {
   // Get current SOL price if not provided
@@ -219,6 +282,8 @@ async function createDao(
   const daoAccount = Keypair.generate();
   console.log('Generated DAO account:', daoAccount.publicKey.toString());
   
+  console.log('Serializing DAO instruction with token_address:', token_address);
+  
   // Serialize instruction data
   const data = serializeCreateDaoInstruction(
     name,
@@ -231,6 +296,7 @@ async function createDao(
     website,
     treasury,
     profile,
+    token_address,
     sol_price_usd
   );
   
@@ -375,6 +441,135 @@ async function vote(
   return voteAccount.publicKey;
 }
 
+// Create a featured listing for a DAO
+async function createFeatured(
+  payer,
+  daoId,
+  sol_price_usd = null // Optional parameter for direct price input
+) {
+  // Get current SOL price if not provided
+  if (sol_price_usd === null) {
+    sol_price_usd = await getSolPrice();
+  }
+  console.log(`Creating Featured listing with SOL price: $${sol_price_usd/100} (${sol_price_usd} cents)`);
+  
+  // Calculate expected fee based on SOL price
+  const expectedFeeInSol = 20 / (sol_price_usd / 100);
+  const expectedFeeInLamports = Math.round(expectedFeeInSol * 1_000_000_000);
+  console.log(`Expected fee: ${expectedFeeInSol} SOL (${expectedFeeInLamports} lamports)`);
+  
+  // Generate a new keypair for the Featured account
+  const featuredAccount = Keypair.generate();
+  console.log('Generated Featured account:', featuredAccount.publicKey.toString());
+  
+  // Serialize instruction data
+  const data = serializeFeaturedInstruction(
+    daoId,
+    sol_price_usd
+  );
+  
+  // Create instruction
+  const instruction = new TransactionInstruction({
+    keys: [
+      { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+      { pubkey: featuredAccount.publicKey, isSigner: true, isWritable: true },
+      { pubkey: new PublicKey(daoId), isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: FEE_ADDRESS, isSigner: false, isWritable: true },
+    ],
+    programId,
+    data,
+  });
+  
+  // Create transaction
+  const transaction = new Transaction().add(instruction);
+  
+  console.log('Sending transaction...');
+  // Sign transaction with both payer and the new featured account keypair
+  const signature = await sendAndConfirmTransaction(
+    connection, 
+    transaction, 
+    [payer, featuredAccount],
+    {
+      skipPreflight: true, // Skip the preflight check to debug issues
+    }
+  );
+  
+  console.log('Transaction signature:', signature);
+  console.log('DAO featured successfully!');
+  console.log('Featured ID:', featuredAccount.publicKey.toString());
+  
+  return featuredAccount.publicKey;
+}
+
+// Activate a module for a DAO
+async function activateModule(
+  payer,
+  daoId,
+  moduleType, // "POD" or "POL"
+  sol_price_usd = null // Optional parameter for direct price input
+) {
+  // Validate module type
+  if (moduleType !== "POD" && moduleType !== "POL") {
+    throw new Error('Invalid module type. Must be either "POD" or "POL".');
+  }
+  
+  // Get current SOL price if not provided
+  if (sol_price_usd === null) {
+    sol_price_usd = await getSolPrice();
+  }
+  console.log(`Activating module ${moduleType} with SOL price: $${sol_price_usd/100} (${sol_price_usd} cents)`);
+  
+  // Calculate expected fee based on SOL price
+  const expectedFeeInSol = 20 / (sol_price_usd / 100);
+  const expectedFeeInLamports = Math.round(expectedFeeInSol * 1_000_000_000);
+  console.log(`Expected fee: ${expectedFeeInSol} SOL (${expectedFeeInLamports} lamports)`);
+  
+  // Generate a new keypair for the Module account
+  const moduleAccount = Keypair.generate();
+  console.log('Generated Module account:', moduleAccount.publicKey.toString());
+  
+  // Serialize instruction data
+  const data = serializeModulesInstruction(
+    daoId,
+    moduleType,
+    sol_price_usd
+  );
+  
+  // Create instruction
+  const instruction = new TransactionInstruction({
+    keys: [
+      { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+      { pubkey: moduleAccount.publicKey, isSigner: true, isWritable: true },
+      { pubkey: new PublicKey(daoId), isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: FEE_ADDRESS, isSigner: false, isWritable: true },
+    ],
+    programId,
+    data,
+  });
+  
+  // Create transaction
+  const transaction = new Transaction().add(instruction);
+  
+  console.log('Sending transaction...');
+  // Sign transaction with both payer and the new module account keypair
+  const signature = await sendAndConfirmTransaction(
+    connection, 
+    transaction, 
+    [payer, moduleAccount],
+    {
+      skipPreflight: true, // Skip the preflight check to debug issues
+    }
+  );
+  
+  console.log('Transaction signature:', signature);
+  console.log(`Module ${moduleType} activated successfully!`);
+  console.log('Module ID:', moduleAccount.publicKey.toString());
+  
+  return moduleAccount.publicKey;
+}
+
 // Example usage
 async function main() {
   try {
@@ -424,6 +619,19 @@ async function main() {
       proposalId.toString()
     );
     
+    // 4. Create a featured listing for the DAO
+    await createFeatured(
+      payer,
+      daoId.toString()
+    );
+    
+    // 5. Activate a POD module for the DAO
+    await activateModule(
+      payer,
+      daoId.toString(),
+      "POD"
+    );
+    
   } catch (error) {
     console.error('Error:', error);
   }
@@ -437,6 +645,8 @@ module.exports = {
   createDao,
   createProposal,
   vote,
+  createFeatured,
+  activateModule,
   getSolPrice,
   connection,
 }; 
