@@ -102,6 +102,33 @@ pub enum DaoInstruction {
         vote: String,
         proposal_id: String,
     },
+
+    /// Feature a DAO (paid advertisement)
+    /// 
+    /// Accounts:
+    /// 0. `[signer]` Creator account
+    /// 1. `[writable]` New featured account
+    /// 2. `[]` DAO account
+    /// 3. `[]` System program
+    /// 4. `[writable]` Fee recipient account
+    Featured {
+        dao_id: String,
+        sol_price_usd: u64, // Current SOL price in USD cents
+    },
+    
+    /// Enable DAO modules
+    /// 
+    /// Accounts:
+    /// 0. `[signer]` Creator account
+    /// 1. `[writable]` New module account
+    /// 2. `[]` DAO account
+    /// 3. `[]` System program
+    /// 4. `[writable]` Fee recipient account
+    Modules {
+        dao_id: String,
+        module_type: String, // "POD" or "POL"
+        sol_price_usd: u64, // Current SOL price in USD cents
+    },
 }
 
 // DAO account data structure
@@ -139,6 +166,21 @@ pub struct Vote {
     pub voter: Pubkey,
     pub vote: String,
     pub proposal_id: String,
+}
+
+// Featured account data structure
+#[derive(BorshSerialize, BorshDeserialize, Debug)]
+pub struct Featured {
+    pub authority: Pubkey,
+    pub dao_id: String,
+}
+
+// Module account data structure
+#[derive(BorshSerialize, BorshDeserialize, Debug)]
+pub struct Module {
+    pub authority: Pubkey,
+    pub dao_id: String,
+    pub module_type: String,
 }
 
 // Program entrypoint processor
@@ -203,6 +245,12 @@ pub fn process_instruction(
         }
         DaoInstruction::Vote { vote, proposal_id } => {
             process_vote(program_id, accounts, vote, proposal_id)
+        }
+        DaoInstruction::Featured { dao_id, sol_price_usd } => {
+            process_featured(program_id, accounts, dao_id, sol_price_usd)
+        }
+        DaoInstruction::Modules { dao_id, module_type, sol_price_usd } => {
+            process_modules(program_id, accounts, dao_id, module_type, sol_price_usd)
         }
     }
 }
@@ -503,6 +551,178 @@ pub fn process_vote(
     vote_data.serialize(&mut &mut vote_account.data.borrow_mut()[..])?;
     
     msg!("Vote recorded successfully");
+    Ok(())
+}
+
+// Process the featured instruction
+pub fn process_featured(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    dao_id: String,
+    sol_price_usd: u64,
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    
+    // Get the required accounts
+    let creator_account = next_account_info(account_info_iter)?;
+    let featured_account = next_account_info(account_info_iter)?;
+    let dao_account = next_account_info(account_info_iter)?;
+    let system_program = next_account_info(account_info_iter)?;
+    let fee_account = next_account_info(account_info_iter)?;
+    
+    // Verify the creator is signer
+    if !creator_account.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    
+    // Verify fee address is correct
+    let expected_fee_pubkey = Pubkey::from_str(FEE_ADDRESS).unwrap();
+    if *fee_account.key != expected_fee_pubkey {
+        return Err(DaoError::InvalidFeeAccount.into());
+    }
+    
+    // Calculate fee based on current SOL price
+    let feature_fee = calculate_fee_in_lamports(sol_price_usd)?;
+    
+    msg!("Featured DAO fee: {} lamports (${} at SOL price of ${}.{})", 
+        feature_fee,
+        CREATE_DAO_FEE_USD,
+        sol_price_usd / 100,
+        sol_price_usd % 100
+    );
+    
+    // Create featured data structure
+    let featured_data = Featured {
+        authority: *creator_account.key,
+        dao_id,
+    };
+    
+    // Calculate space required for the featured account
+    let featured_serialized = featured_data.try_to_vec()?;
+    let space = featured_serialized.len() as u64;
+    
+    // Calculate the rent required
+    let rent = Rent::get()?;
+    let rent_lamports = rent.minimum_balance(space as usize);
+    
+    // Check if creator has enough funds for rent + fee
+    if creator_account.lamports() < rent_lamports + feature_fee {
+        return Err(DaoError::InsufficientFunds.into());
+    }
+    
+    // Create the featured account
+    invoke(
+        &system_instruction::create_account(
+            creator_account.key,
+            featured_account.key,
+            rent_lamports,
+            space,
+            program_id,
+        ),
+        &[creator_account.clone(), featured_account.clone(), system_program.clone()],
+    )?;
+    
+    // Transfer fee to fee account
+    invoke(
+        &system_instruction::transfer(
+            creator_account.key,
+            fee_account.key,
+            feature_fee,
+        ),
+        &[creator_account.clone(), fee_account.clone(), system_program.clone()],
+    )?;
+    
+    // Serialize and store the featured data
+    featured_data.serialize(&mut &mut featured_account.data.borrow_mut()[..])?;
+    
+    msg!("DAO featured successfully with ID: {}", featured_account.key);
+    Ok(())
+}
+
+// Process the modules instruction
+pub fn process_modules(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    dao_id: String,
+    module_type: String,
+    sol_price_usd: u64,
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    
+    // Get the required accounts
+    let creator_account = next_account_info(account_info_iter)?;
+    let module_account = next_account_info(account_info_iter)?;
+    let dao_account = next_account_info(account_info_iter)?;
+    let system_program = next_account_info(account_info_iter)?;
+    let fee_account = next_account_info(account_info_iter)?;
+    
+    // Verify the creator is signer
+    if !creator_account.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    
+    // Verify fee address is correct
+    let expected_fee_pubkey = Pubkey::from_str(FEE_ADDRESS).unwrap();
+    if *fee_account.key != expected_fee_pubkey {
+        return Err(DaoError::InvalidFeeAccount.into());
+    }
+    
+    // Calculate fee based on current SOL price
+    let module_fee = calculate_fee_in_lamports(sol_price_usd)?;
+    
+    msg!("Module activation fee: {} lamports (${} at SOL price of ${}.{})", 
+        module_fee,
+        CREATE_DAO_FEE_USD,
+        sol_price_usd / 100,
+        sol_price_usd % 100
+    );
+    
+    // Create module data structure
+    let module_data = Module {
+        authority: *creator_account.key,
+        dao_id,
+        module_type,
+    };
+    
+    // Calculate space required for the module account
+    let module_serialized = module_data.try_to_vec()?;
+    let space = module_serialized.len() as u64;
+    
+    // Calculate the rent required
+    let rent = Rent::get()?;
+    let rent_lamports = rent.minimum_balance(space as usize);
+    
+    // Check if creator has enough funds for rent + fee
+    if creator_account.lamports() < rent_lamports + module_fee {
+        return Err(DaoError::InsufficientFunds.into());
+    }
+    
+    // Create the module account
+    invoke(
+        &system_instruction::create_account(
+            creator_account.key,
+            module_account.key,
+            rent_lamports,
+            space,
+            program_id,
+        ),
+        &[creator_account.clone(), module_account.clone(), system_program.clone()],
+    )?;
+    
+    // Transfer fee to fee account
+    invoke(
+        &system_instruction::transfer(
+            creator_account.key,
+            fee_account.key,
+            module_fee,
+        ),
+        &[creator_account.clone(), fee_account.clone(), system_program.clone()],
+    )?;
+    
+    // Serialize and store the module data
+    module_data.serialize(&mut &mut module_account.data.borrow_mut()[..])?;
+    
+    msg!("DAO module activated successfully with ID: {}", module_account.key);
     Ok(())
 }
 
