@@ -9,6 +9,8 @@ The Solana DAO Program provides a complete solution for creating and managing DA
 - Create DAOs with customizable metadata
 - Create proposals within DAOs
 - Vote on proposals with "for", "against" options
+- Feature DAOs for better visibility
+- Enable module extensions to enhance DAO functionality
 - Manage fees automatically with a dynamic fee system
 
 ## Features
@@ -16,12 +18,14 @@ The Solana DAO Program provides a complete solution for creating and managing DA
 - **Create a DAO** - Establish a new DAO with comprehensive metadata including social links and web presence
 - **Create a Proposal** - Submit proposals to a DAO with customizable start and end times
 - **Vote on Proposals** - Community members can vote on active proposals
-- **Dynamic Fee System** - The DAO creation fee is fixed at $20 USD but dynamically adjusts based on the current SOL price
+- **Featured DAOs** - Pay to feature your DAO at the top of the webapp for better visibility
+- **DAO Modules** - Enable extensions like POD (Teams) and POL (Proof-Of-Love) to enhance DAO functionality
+- **Dynamic Fee System** - All paid features have a fixed $20 USD fee that dynamically adjusts based on the current SOL price
 - **Fee Distribution** - Each function sends fees to a specified wallet address
 
 ## Dynamic Fee System
 
-The DAO creation fee is fixed at $20 USD but dynamically adjusts based on the current SOL price:
+The fee for creating a DAO, featuring a DAO, or activating modules is fixed at $20 USD but dynamically adjusts based on the current SOL price:
 
 - The client fetches the current SOL price from an API (CoinGecko)
 - This price is passed to the smart contract as a parameter
@@ -73,6 +77,25 @@ struct Vote {
 }
 ```
 
+### Featured Structure
+
+```rust
+struct Featured {
+    authority: Pubkey,      // Creator of the featured entry
+    dao_id: String,         // DAO public key that is featured
+}
+```
+
+### Module Structure
+
+```rust
+struct Module {
+    authority: Pubkey,      // Creator of the module
+    dao_id: String,         // DAO public key this module belongs to
+    module_type: String,    // Type of module ("POD" or "POL")
+}
+```
+
 ## Building and Deploying
 
 ### Building the Program
@@ -109,7 +132,9 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { 
   createDaoTransaction, 
   createProposalTransaction, 
-  createVoteTransaction 
+  createVoteTransaction,
+  createFeaturedTransaction,
+  createModuleTransaction
 } from './solana-dao';
 
 // Create a connection to the Solana network
@@ -150,6 +175,59 @@ const handleCreateDao = async () => {
     throw error;
   }
 };
+
+// Example: Feature a DAO
+const handleFeatureDao = async (daoId) => {
+  try {
+    // Create the transaction
+    const { transaction, featuredAccount } = await createFeaturedTransaction(
+      connection,
+      wallet,
+      daoId
+    );
+    
+    // Send the transaction to the wallet for signing
+    const signature = await wallet.sendTransaction(transaction, connection);
+    
+    // Confirm the transaction
+    await connection.confirmTransaction(signature, 'confirmed');
+    
+    console.log('DAO featured successfully!');
+    console.log('Featured ID:', featuredAccount.publicKey.toString());
+    
+    return featuredAccount.publicKey.toString();
+  } catch (error) {
+    console.error('Error featuring DAO:', error);
+    throw error;
+  }
+};
+
+// Example: Activate a module
+const handleActivateModule = async (daoId, moduleType) => {
+  try {
+    // Create the transaction
+    const { transaction, moduleAccount } = await createModuleTransaction(
+      connection,
+      wallet,
+      daoId,
+      moduleType // "POD" or "POL"
+    );
+    
+    // Send the transaction to the wallet for signing
+    const signature = await wallet.sendTransaction(transaction, connection);
+    
+    // Confirm the transaction
+    await connection.confirmTransaction(signature, 'confirmed');
+    
+    console.log('Module activated successfully!');
+    console.log('Module ID:', moduleAccount.publicKey.toString());
+    
+    return moduleAccount.publicKey.toString();
+  } catch (error) {
+    console.error('Error activating module:', error);
+    throw error;
+  }
+};
 ```
 
 ## Integration with Web Applications
@@ -173,7 +251,7 @@ const wallet = useWallet();
 - All functions verify that the transaction signer has the proper authority
 - The SOL price is validated to be within reasonable bounds to prevent manipulation
 - For proposals, the program validates that start time is after the current time and end time is after start time
-- For votes, the program validates that the vote is one of the allowed values ("yes", "no", or "abstain")
+- For votes, the program validates that the vote is one of the allowed values ("for" or "against")
 - The program checks if the creator has sufficient funds for transaction fees
 
 ## Error Handling
