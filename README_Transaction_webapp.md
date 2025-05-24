@@ -154,6 +154,67 @@ export function serializeVoteInstruction(
   ]);
 }
 
+// Serialize featured instruction data
+export function serializeFeaturedInstruction(
+  daoId: string,
+  solPriceUsd: number
+): Buffer {
+  // Instruction index (3 for Featured)
+  const instructionBuf = Buffer.alloc(1);
+  instructionBuf.writeUInt8(3, 0);
+  
+  // Serialize string
+  const daoIdBuf = serializeString(daoId);
+  
+  // Serialize u64 sol price (8 bytes, little-endian)
+  const solPriceBuf = Buffer.alloc(8);
+  
+  // Convert to u64 (BN)
+  const solPriceBN = new BN(solPriceUsd.toString());
+  solPriceBN.toArray('le', 8).forEach((byte, index) => {
+    solPriceBuf[index] = byte;
+  });
+  
+  // Concat all buffers
+  return Buffer.concat([
+    instructionBuf,
+    daoIdBuf,
+    solPriceBuf
+  ]);
+}
+
+// Serialize modules instruction data
+export function serializeModulesInstruction(
+  daoId: string,
+  moduleType: string,
+  solPriceUsd: number
+): Buffer {
+  // Instruction index (4 for Modules)
+  const instructionBuf = Buffer.alloc(1);
+  instructionBuf.writeUInt8(4, 0);
+  
+  // Serialize strings
+  const daoIdBuf = serializeString(daoId);
+  const moduleTypeBuf = serializeString(moduleType);
+  
+  // Serialize u64 sol price (8 bytes, little-endian)
+  const solPriceBuf = Buffer.alloc(8);
+  
+  // Convert to u64 (BN)
+  const solPriceBN = new BN(solPriceUsd.toString());
+  solPriceBN.toArray('le', 8).forEach((byte, index) => {
+    solPriceBuf[index] = byte;
+  });
+  
+  // Concat all buffers
+  return Buffer.concat([
+    instructionBuf,
+    daoIdBuf,
+    moduleTypeBuf,
+    solPriceBuf
+  ]);
+}
+
 // Fetch current SOL price from an API
 export async function getSolPrice(): Promise<number> {
   try {
@@ -332,6 +393,111 @@ export async function createVoteTransaction(
   
   return { transaction, voteAccount };
 }
+
+// Create a featured transaction
+export async function createFeaturedTransaction(
+  connection: Connection,
+  wallet: { publicKey: PublicKey },
+  daoId: string,
+  solPriceUsd?: number // Optional - will fetch current price if not provided
+): Promise<{ transaction: Transaction, featuredAccount: Keypair }> {
+  if (!wallet.publicKey) throw new Error("Wallet not connected");
+  
+  // Get current SOL price if not provided
+  if (!solPriceUsd) {
+    solPriceUsd = await getSolPrice();
+  }
+  
+  // Generate a new keypair for the featured entry
+  const featuredAccount = Keypair.generate();
+  
+  // Serialize instruction data
+  const data = serializeFeaturedInstruction(
+    daoId,
+    solPriceUsd
+  );
+  
+  // Create instruction
+  const instruction = new TransactionInstruction({
+    keys: [
+      { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+      { pubkey: featuredAccount.publicKey, isSigner: true, isWritable: true },
+      { pubkey: new PublicKey(daoId), isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: FEE_ADDRESS, isSigner: false, isWritable: true },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+  
+  // Create transaction
+  const transaction = new Transaction().add(instruction);
+  
+  // Set recent blockhash
+  transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  transaction.feePayer = wallet.publicKey;
+  
+  // Partially sign with the featured account
+  transaction.partialSign(featuredAccount);
+  
+  return { transaction, featuredAccount };
+}
+
+// Create a module activation transaction
+export async function createModuleTransaction(
+  connection: Connection,
+  wallet: { publicKey: PublicKey },
+  daoId: string,
+  moduleType: string, // "POD" or "POL"
+  solPriceUsd?: number // Optional - will fetch current price if not provided
+): Promise<{ transaction: Transaction, moduleAccount: Keypair }> {
+  if (!wallet.publicKey) throw new Error("Wallet not connected");
+  
+  // Validate module type
+  if (moduleType !== "POD" && moduleType !== "POL") {
+    throw new Error('Invalid module type. Must be either "POD" or "POL".');
+  }
+  
+  // Get current SOL price if not provided
+  if (!solPriceUsd) {
+    solPriceUsd = await getSolPrice();
+  }
+  
+  // Generate a new keypair for the module
+  const moduleAccount = Keypair.generate();
+  
+  // Serialize instruction data
+  const data = serializeModulesInstruction(
+    daoId,
+    moduleType,
+    solPriceUsd
+  );
+  
+  // Create instruction
+  const instruction = new TransactionInstruction({
+    keys: [
+      { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+      { pubkey: moduleAccount.publicKey, isSigner: true, isWritable: true },
+      { pubkey: new PublicKey(daoId), isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: FEE_ADDRESS, isSigner: false, isWritable: true },
+    ],
+    programId: PROGRAM_ID,
+    data,
+  });
+  
+  // Create transaction
+  const transaction = new Transaction().add(instruction);
+  
+  // Set recent blockhash
+  transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  transaction.feePayer = wallet.publicKey;
+  
+  // Partially sign with the module account
+  transaction.partialSign(moduleAccount);
+  
+  return { transaction, moduleAccount };
+}
 ```
 
 ## Usage with Wallet Adapter
@@ -419,4 +585,129 @@ Then we pass pubkey and txTransaction into the form :
   profile?: string
   token_address: string
 }
+```
+
+## Featured and Modules Integration
+
+Here's how to use the new featured and module activation functions with `@solana/wallet-adapter-react`:
+
+### Featured Integration
+
+```typescript
+import { useConnection, useWallet } from '@solana/wallet-adapter-react';
+import { createFeaturedTransaction } from './solana-dao';
+
+// Inside your React component:
+const { connection } = useConnection();
+const wallet = useWallet();
+
+const handleCreateFeatured = async (daoId: string) => {
+  try {
+    // Create the transaction
+    const { transaction, featuredAccount } = await createFeaturedTransaction(
+      connection,
+      wallet,
+      daoId
+    );
+    
+    // Send the transaction to the wallet for signing
+    const signature = await wallet.sendTransaction(transaction, connection);
+    
+    // Confirm the transaction
+    await connection.confirmTransaction(signature, 'confirmed');
+    
+    console.log('DAO featured successfully!');
+    console.log('Featured ID:', featuredAccount.publicKey.toString());
+    
+    // Now you can update your UI to show the DAO as featured
+    // and store the featuredAccount.publicKey for reference
+    
+    return featuredAccount.publicKey.toString();
+  } catch (error) {
+    console.error('Error featuring DAO:', error);
+    throw error;
+  }
+};
+```
+
+### Module Activation Integration
+
+```typescript
+import { useConnection, useWallet } from '@solana/wallet-adapter-react';
+import { createModuleTransaction } from './solana-dao';
+
+// Inside your React component:
+const { connection } = useConnection();
+const wallet = useWallet();
+
+const handleActivateModule = async (daoId: string, moduleType: "POD" | "POL") => {
+  try {
+    // Create the transaction
+    const { transaction, moduleAccount } = await createModuleTransaction(
+      connection,
+      wallet,
+      daoId,
+      moduleType
+    );
+    
+    // Send the transaction to the wallet for signing
+    const signature = await wallet.sendTransaction(transaction, connection);
+    
+    // Confirm the transaction
+    await connection.confirmTransaction(signature, 'confirmed');
+    
+    console.log(`Module ${moduleType} activated successfully!`);
+    console.log('Module ID:', moduleAccount.publicKey.toString());
+    
+    // Now you can update your UI to show the module as activated
+    // and store the moduleAccount.publicKey for reference
+    
+    return moduleAccount.publicKey.toString();
+  } catch (error) {
+    console.error(`Error activating ${moduleType} module:`, error);
+    throw error;
+  }
+};
+```
+
+### API Integration for Featured and Modules
+
+After creating the transactions, you can integrate with your API using similar patterns:
+
+```typescript
+// For featured DAO
+const { transaction, featuredAccount } = await createFeaturedTransaction(
+  connection, 
+  wallet, 
+  daoId
+);
+
+const signature = await wallet.sendTransaction(transaction, connection);
+await connection.confirmTransaction(signature, 'confirmed');
+
+// Send to your API
+const featuredData = {
+  dao_id: daoId,
+  pubkey: featuredAccount.publicKey.toString(),
+  transaction: signature
+};
+
+// For module activation
+const { transaction, moduleAccount } = await createModuleTransaction(
+  connection, 
+  wallet, 
+  daoId,
+  "POD" // or "POL"
+);
+
+const signature = await wallet.sendTransaction(transaction, connection);
+await connection.confirmTransaction(signature, 'confirmed');
+
+// Send to your API
+const moduleData = {
+  dao_id: daoId,
+  module_type: "POD", // or "POL"
+  pubkey: moduleAccount.publicKey.toString(),
+  transaction: signature
+};
 ```
