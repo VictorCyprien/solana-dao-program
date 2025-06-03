@@ -113,6 +113,7 @@ pub enum DaoInstruction {
     /// 4. `[writable]` Fee recipient account
     Featured {
         dao_id: String,
+        days: u64, // Number of days to feature the DAO
         sol_price_usd: u64, // Current SOL price in USD cents
     },
     
@@ -173,6 +174,7 @@ pub struct Vote {
 pub struct Featured {
     pub authority: Pubkey,
     pub dao_id: String,
+    pub days: u64,
 }
 
 // Module account data structure
@@ -246,8 +248,8 @@ pub fn process_instruction(
         DaoInstruction::Vote { vote, proposal_id } => {
             process_vote(program_id, accounts, vote, proposal_id)
         }
-        DaoInstruction::Featured { dao_id, sol_price_usd } => {
-            process_featured(program_id, accounts, dao_id, sol_price_usd)
+        DaoInstruction::Featured { dao_id, days, sol_price_usd } => {
+            process_featured(program_id, accounts, dao_id, days, sol_price_usd)
         }
         DaoInstruction::Modules { dao_id, module_type, sol_price_usd } => {
             process_modules(program_id, accounts, dao_id, module_type, sol_price_usd)
@@ -268,6 +270,33 @@ fn calculate_fee_in_lamports(sol_price_usd: u64) -> Result<u64, ProgramError> {
     let sol_amount = (CREATE_DAO_FEE_USD as u128 * 100 * 1_000_000_000) / sol_price_usd as u128;
     
     // Check for overflow or other calculation errors
+    if sol_amount > u64::MAX as u128 {
+        return Err(DaoError::InvalidSolPrice.into());
+    }
+    
+    Ok(sol_amount as u64)
+}
+
+// Calculate featured fee in lamports based on SOL price and number of days
+fn calculate_featured_fee_in_lamports(sol_price_usd: u64, days: u64) -> Result<u64, ProgramError> {
+    // Validate price is within reasonable bounds
+    if sol_price_usd < 100 || sol_price_usd > 1_000_000 {
+        return Err(DaoError::InvalidSolPrice.into());
+    }
+    
+    // Validate days (reasonable limit: 1-365 days)
+    if days == 0 || days > 365 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    
+    // Calculate daily fee: $20 per day
+    let daily_fee_usd = CREATE_DAO_FEE_USD;
+    let total_fee_usd = daily_fee_usd * days;
+    
+    // Calculate SOL amount needed
+    let sol_amount = (total_fee_usd as u128 * 100 * 1_000_000_000) / sol_price_usd as u128;
+    
+    // Check for overflow
     if sol_amount > u64::MAX as u128 {
         return Err(DaoError::InvalidSolPrice.into());
     }
@@ -559,6 +588,7 @@ pub fn process_featured(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     dao_id: String,
+    days: u64,
     sol_price_usd: u64,
 ) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
@@ -581,12 +611,14 @@ pub fn process_featured(
         return Err(DaoError::InvalidFeeAccount.into());
     }
     
-    // Calculate fee based on current SOL price
-    let feature_fee = calculate_fee_in_lamports(sol_price_usd)?;
+    // Calculate fee based on current SOL price and number of days
+    let feature_fee = calculate_featured_fee_in_lamports(sol_price_usd, days)?;
+    let total_usd_fee = CREATE_DAO_FEE_USD * days;
     
-    msg!("Featured DAO fee: {} lamports (${} at SOL price of ${}.{})", 
+    msg!("Featured DAO fee: {} lamports (${} for {} days at SOL price of ${}.{})", 
         feature_fee,
-        CREATE_DAO_FEE_USD,
+        total_usd_fee,
+        days,
         sol_price_usd / 100,
         sol_price_usd % 100
     );
@@ -595,6 +627,7 @@ pub fn process_featured(
     let featured_data = Featured {
         authority: *creator_account.key,
         dao_id,
+        days,
     };
     
     // Calculate space required for the featured account
