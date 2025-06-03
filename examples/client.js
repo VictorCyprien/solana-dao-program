@@ -194,6 +194,7 @@ function serializeVoteInstruction(
 
 function serializeFeaturedInstruction(
   daoId,
+  days,
   solPriceUsd
 ) {
   // Instruction index (3 for Featured)
@@ -202,6 +203,13 @@ function serializeFeaturedInstruction(
   
   // Serialize string
   const daoIdBuf = serializeString(daoId);
+  
+  // Serialize u64 days (8 bytes, little-endian)
+  const daysBuf = Buffer.alloc(8);
+  const daysBN = new BN(days.toString());
+  daysBN.toArray('le', 8).forEach((byte, index) => {
+    daysBuf[index] = byte;
+  });
   
   // Serialize u64 sol price (8 bytes, little-endian)
   const solPriceBuf = Buffer.alloc(8);
@@ -216,6 +224,7 @@ function serializeFeaturedInstruction(
   return Buffer.concat([
     instructionBuf,
     daoIdBuf,
+    daysBuf,
     solPriceBuf
   ]);
 }
@@ -445,18 +454,20 @@ async function vote(
 async function createFeatured(
   payer,
   daoId,
+  days = 1, // Number of days to feature the DAO (default: 1 day)
   sol_price_usd = null // Optional parameter for direct price input
 ) {
   // Get current SOL price if not provided
   if (sol_price_usd === null) {
     sol_price_usd = await getSolPrice();
   }
-  console.log(`Creating Featured listing with SOL price: $${sol_price_usd/100} (${sol_price_usd} cents)`);
+  console.log(`Creating Featured listing for ${days} days with SOL price: $${sol_price_usd/100} (${sol_price_usd} cents)`);
   
-  // Calculate expected fee based on SOL price
-  const expectedFeeInSol = 20 / (sol_price_usd / 100);
+  // Calculate expected fee based on SOL price and days
+  const totalUsdFee = 20 * days; // $20 per day
+  const expectedFeeInSol = totalUsdFee / (sol_price_usd / 100);
   const expectedFeeInLamports = Math.round(expectedFeeInSol * 1_000_000_000);
-  console.log(`Expected fee: ${expectedFeeInSol} SOL (${expectedFeeInLamports} lamports)`);
+  console.log(`Expected fee: $${totalUsdFee} for ${days} days = ${expectedFeeInSol} SOL (${expectedFeeInLamports} lamports)`);
   
   // Generate a new keypair for the Featured account
   const featuredAccount = Keypair.generate();
@@ -465,6 +476,7 @@ async function createFeatured(
   // Serialize instruction data
   const data = serializeFeaturedInstruction(
     daoId,
+    days,
     sol_price_usd
   );
   
@@ -619,10 +631,11 @@ async function main() {
       proposalId.toString()
     );
     
-    // 4. Create a featured listing for the DAO
+    // 4. Create a featured listing for the DAO (7 days)
     await createFeatured(
       payer,
-      daoId.toString()
+      daoId.toString(),
+      7 // Feature for 7 days
     );
     
     // 5. Activate a POD module for the DAO
